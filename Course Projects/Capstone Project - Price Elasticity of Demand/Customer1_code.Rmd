@@ -1,0 +1,860 @@
+---
+title: "Capstone Project - Jigsaw/Analytics Edge - Customer 1"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+
+```{r}
+rm(list = ls())
+
+#Loading the required packages
+library(readxl)
+library(dplyr)
+library(ggplot2)
+
+library(lubridate)
+library(data.table)
+library(caTools)
+library(caret)
+library(car)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#Load the datasets
+data1 = read_excel("Project_Dataset.xlsx", sheet = "Customer1")
+```
+
+Customer1: EDA and Data preparation
+```{r}
+summary(data1)
+```
+
+
+```{r}
+str(data1)
+```
+
+
+```{r}
+#Converting numeric variables to factor variables
+data1$ProdRptCat <- as.factor(data1$ProdRptCat)
+data1$PRODSTYLE <- as.factor(data1$PRODSTYLE)
+data1$PartNumber <- as.factor(data1$PartNumber)
+data1$StoreNumber <- as.factor(data1$StoreNumber)
+data1$StateTerritory <- as.factor(data1$StateTerritory)
+
+length(unique(data1$PRODSTYLE))
+length(unique(data1$EndDate))
+length(unique(data1$StoreNumber))
+length(unique(data1$StateTerritory))
+
+#Customer1 sells 7 different types of products and has 61 weeks of transaction data across 3987 stores spread across 42 states
+```
+
+
+```{r}
+#What are the different types of products sold in Customer1?
+table(data1$PRODSTYLE)
+
+ggplot(data1, aes(x=PRODSTYLE, fill = PRODSTYLE))+
+  geom_bar()+
+  theme_classic()+
+  labs(title = "Product Classification")
+#There are 7 products in total, but products 'SP001', 'WD012', 'WD029' have very less records in the dataset
+```
+
+
+```{r}
+#How many units of each products sold?
+data1 %>% group_by(PRODSTYLE) %>% summarise(sum(UnitsSold))
+
+
+ggplot(data1, aes(x=PRODSTYLE, y = UnitsSold, color = PRODSTYLE))+
+  geom_boxplot()+
+  theme_bw()+
+  labs(y = "Units Sold", title = "Product Vs Unit Sold")
+#The average units sold across each products are in the range of 1. We can see outliers/spike in units sold for certain products, which might be due to heavy advertising/promotion during certain weeks.
+```
+
+
+```{r}
+#How is the reveneue(Amount Sold) distributed across products?
+ggplot(data1, aes(x=PRODSTYLE, y = AmtSold, color = PRODSTYLE))+
+  geom_boxplot()+
+  theme_bw()+
+  labs(y = "Amount Sold", title = "Product Vs Amount Sold")
+
+##Negative values are seen in some of the products. This might be due to product returns/cashbacks/discounts.
+```
+
+
+```{r}
+#Relationship between price and quantity sold across each products?
+ggplot(data1, aes(x=AmtSold, y = UnitsSold, col = PRODSTYLE))+
+  geom_point()+
+  facet_wrap(~PRODSTYLE, ncol = 4)+
+  theme_bw()+
+  labs(x = "Amount Sold", y = "Units Sold", title = "Quantity Vs Amount Sold")
+```
+
+
+```{r}
+#We will remove the following 3 products as they have significantly very less observations in the dataset: SP001, WDO12, WD017
+data1 <- data1[!data1$PRODSTYLE %in% c("SP001", "WD012", "WD029"),]
+table(data1$PRODSTYLE)
+```
+
+
+```{r}
+#To determine elasticity, we need the unit price of the products sold
+data1$UnitPrice <- round((data1$AmtSold/data1$UnitsSold),2)
+```
+
+
+```{r}
+#Identify the transactions which has Unit Price <= 0
+data1 %>% filter(UnitPrice <=0)
+#There are 1008 observations which has unit Price <= 0
+```
+
+
+```{r}
+#Deleting observations with negative values in UnitsSold & UnitPrice.
+data1 <- data1 %>% filter(!UnitPrice <=0)
+```
+
+
+```{r}
+#Aggregate dataset based on EndDate and PRODSTYLE
+d1 <- data1 %>% group_by(EndDate,PRODSTYLE) %>% summarize(UnitsSold = sum(UnitsSold), UnitPrice = round(mean(UnitPrice),2))
+d1$Week <- lubridate::week(ymd(d1$EndDate))
+d1$ModWeek <- rep(1:61,each = 4)
+d1
+```
+
+
+```{r}
+#Visualizing Price change over the weeks for all products
+ggplot(d1, aes(x = EndDate, y = UnitPrice))+
+  geom_line(aes(color = PRODSTYLE), size = 1)+
+  theme_bw()+
+  labs(x="Week Duration", y = "Unit Price", title = "Change in Product prices over Time")
+
+#There is a sharp decline in prices for SPC brands from March 2016
+```
+
+```{r}
+#Facet Wrapping Price change over the weeks for all products
+ggplot(d1, aes(x = EndDate, y = UnitPrice, col=PRODSTYLE))+
+  geom_line(size = 1)+
+  theme_bw()+
+  facet_wrap(~PRODSTYLE, ncol = 2)+
+  labs(x="Week Duration", y = "Unit Price", title = "Facet Wrap of Product price change over Time")
+```
+
+```{r}
+#Visualizing change in quantity sold over the weeks for all products
+ggplot(d1, aes(x = EndDate, y = UnitsSold))+
+  geom_line(aes(color = PRODSTYLE), size = 1)+
+  theme_bw()+
+  labs(x="Week Duration", y = "Quantity Sold", title = "Change in Quantity Sold over Time")
+
+#The peak in quantity sold of WD products might be due to promotions. 
+#There is a sharp decline in WD009 products towards Jun 2016
+```
+
+```{r}
+#Visualizing Quantity sold with variation in price for all products
+ggplot(d1, aes(x = UnitPrice, y = UnitsSold))+
+  geom_point(aes(color = PRODSTYLE))+
+  theme_bw()+
+  labs(title = "Change in Units Sold with change in Price")
+
+#For WD products, the quantity decreases with increase in Price. On the other hand, for SP products, quantity increases with price increase
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting Customer1 based on the type of products
+d1w1 <- d1 %>% filter(PRODSTYLE == "WD009") %>% select(Week, ModWeek, WD9_Units = UnitsSold, WD9_Price = UnitPrice)
+d1w1_a <- d1w1
+d1w1 <- d1w1[-1]
+
+d1w2 <- d1 %>% filter(PRODSTYLE == "WD017") %>% select(Week, ModWeek, WD17_Units = UnitsSold, WD17_Price = UnitPrice)
+d1w2_a <- d1w2
+d1w2 <- d1w2[-1]
+
+d1s1 <- d1 %>% filter(PRODSTYLE == "SPC11") %>% select(Week, ModWeek, SP11_Units = UnitsSold, SP11_Price = UnitPrice)
+d1s1 <- d1s1[-1]
+
+d1s2 <- d1 %>% filter(PRODSTYLE == "SPC13") %>% select(Week, ModWeek, SP13_Units = UnitsSold, SP13_Price = UnitPrice)
+d1s2 <- d1s2[-1]
+```
+
+
+```{r}
+#Product WD009 - Price Vs Quantity sold
+ggplot(d1w1, aes(x = WD9_Price, y = WD9_Units))+
+  geom_point(color = "red")+
+  theme_bw()+
+  labs(title = "Product WD009 - Price Vs Quantity sold")
+#The demand for Wd009 product increases as the price decreases
+```
+
+
+```{r}
+#Product WD017 - Price Vs Quantity sold
+ggplot(d1w2, aes(x = WD17_Price, y = WD17_Units))+
+  geom_point(color = "red")+
+  theme_bw()+
+  labs(title = "Product WD017 - Price Vs Quantity sold")
+#The demand for Wd017 product increases as the price decreases 
+```
+
+```{r}
+#Product SPC11 - Price Vs Quantity sold
+ggplot(d1s1, aes(x = SP11_Price, y = SP11_Units))+
+  geom_point(color = "blue")+
+  theme_bw()+
+  labs(title = "Product SPC11 - Price Vs Quantity sold")
+#The demand for SP11 product has decreased with decrease in price 
+```
+
+
+```{r}
+#Product SPC13 - Price Vs Quantity sold
+ggplot(d1s2, aes(x = SP13_Price, y = SP13_Units))+
+  geom_point(color = "blue")+
+  theme_bw()+
+  labs(title = "Product SPC13 - Price Vs Quantity sold")
+#The demand for SP13 product has decreased with decrease in price 
+```
+
+
+```{r}
+#Merge the product pice and quantity sold based on Weeks
+finaldata1 <- full_join(d1w1,d1w2, by = "ModWeek") %>% full_join(.,d1s1, by = "ModWeek") %>% full_join(.,d1s2, by = "ModWeek")
+
+finaldata1 <- finaldata1[-c(2,5,8,11)]
+setnames(finaldata1, old = "Week.x", new = "Week")
+finaldata1
+
+```
+
+```{r}
+library(corrplot)
+M <- cor(finaldata1)
+corrplot(M, method = "circle")
+#Clearly the price of SPC11 and SPC13 products are highly correlated. We can remove one of the products before modelling
+finaldata1 <- finaldata1[,-9]
+```
+
+```{r}
+#Creating log transformations
+finaldata1$log_WD9_Units <- log(finaldata1$WD9_Units)
+finaldata1$log_WD9_Price <- log(finaldata1$WD9_Price)
+finaldata1$log_WD17_Units <- log(finaldata1$WD17_Units)
+finaldata1$log_WD17_Price <- log(finaldata1$WD17_Price)
+finaldata1$log_SP11_Units <- log(finaldata1$SP11_Units)
+finaldata1$log_SP11_Price <- log(finaldata1$SP11_Price)
+finaldata1$log_SP13_Units <- log(finaldata1$SP13_Units)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting the dataset into train and test
+set.seed(99)
+split <- sample.split(finaldata1, SplitRatio = 0.85)
+train <- subset(finaldata1, split == T)
+test <- subset(finaldata1, split == F)
+```
+
+```{r}
+#WD009
+#Linear Regression: Linear-Linear
+d1mod1a <- lm(WD9_Units ~ WD9_Price + Week, data = train)
+summary(d1mod1a)
+residualPlot(d1mod1a)
+```
+
+```{r}
+#Predict Model and evalaute the metrics
+predict1 <- predict(d1mod1a, test)
+vif(d1mod1a)
+RMSE(predict1, test$WD9_Units)
+MAE(predict1, test$WD9_Units)
+R2(predict1, test$WD9_Units)
+```
+
+```{r}
+#WD009
+#Linear Regression: Linear-Log
+d1mod1b <- lm(WD9_Units ~ log_WD9_Price + Week, data = train)
+summary(d1mod1b)
+residualPlot(d1mod1b)
+```
+
+```{r}
+#Predict Model and evalaute the metrics
+predict1 <- predict(d1mod1b, test)
+vif(d1mod1b)
+RMSE(predict1, test$WD9_Units)
+MAE(predict1, test$WD9_Units)
+R2(predict1, test$WD9_Units)
+```
+
+```{r}
+#WD009
+#Linear Regression: Log-Linear
+d1mod1c <- lm(log_WD9_Units ~ WD9_Price + Week, data = train)
+summary(d1mod1c)
+residualPlot(d1mod1c)
+```
+
+```{r}
+#Predict Model and evalaute the metrics
+predict1 <- predict(d1mod1c, test)
+vif(d1mod1c)
+RMSE(predict1, test$WD9_Units)
+MAE(predict1, test$WD9_Units)
+R2(predict1, test$WD9_Units)
+```
+
+```{r}
+#WD009
+#Linear Regression: Log-Log
+d1mod1d <- lm(log_WD9_Units ~ log_WD9_Price + Week, data = train)
+summary(d1mod1d)
+residualPlot(d1mod1d)
+```
+
+```{r}
+#Predict Model and evalaute the metrics
+predict1 <- predict(d1mod1d, test)
+vif(d1mod1d)
+RMSE(predict1, test$WD9_Units)
+MAE(predict1, test$WD9_Units)
+R2(predict1, test$WD9_Units)
+```
+
+```{r}
+print("Linear-log model gives better accuracy. So lets determine elasticity based on this model")
+```
+
+```{r}
+#Estimating price elasticity for WD009
+e_WD9a <- (-9333.522 * (mean(finaldata1$log_WD9_Price) / mean(finaldata1$WD9_Units)))
+round(e_WD9a,2)
+print("A 10% increase in price for WD009 will result in 30.8% decrease in their demand")
+
+#The demand for WD009 is not impacted by price changes in WD017 & SPC11
+e1 <- c(round(e_WD9a,2), NA, NA)
+e1
+```
+
+
+```{r}
+#WD017
+#Linear Regression: Linear-Log 
+d1mod2 <- lm(WD17_Units ~ log_WD17_Price + log_SP11_Units + log_SP11_Price, data = train)
+summary(d1mod2)
+residualPlot(d1mod2)
+```
+
+```{r}
+#Predict Model2 and evalaute the metrics
+predict2 <- predict(d1mod2, test)
+vif(d1mod2)
+RMSE(predict2, test$WD17_Units)
+MAE(predict2, test$WD17_Units)
+R2(predict2, test$WD17_Units)
+```
+
+```{r}
+#Estimating price elasticity for WD017
+e_WD17b <- (-7629.5 * (mean(finaldata1$log_WD17_Price) / mean(finaldata1$WD17_Units)))
+round(e_WD17b,2)
+print("A 10% increase in price for WD017 will result in 17.3% decrease in their demand")
+
+#Estimating cross price elasticity for WD017
+#Negative sign in the coefficient of SPC11 indicates that it is a complement for WD017 products
+e_WD17c <- (-1146.2 * (mean(finaldata1$log_SP11_Price) / mean(finaldata1$WD17_Units)))
+round(e_WD17c,2)
+print("A 10% increase in price for SPC11 will result in 1.6% decrease in the demand for WD017")
+
+#The demand for WD017 is not impacted by price change in WD009
+e2 <- c( NA, round(e_WD17b,2), round(e_WD17c,2))
+e2
+```
+
+
+
+```{r}
+#SPC11
+#Linear Regression: Linear-Log
+d1mod3 <- lm(SP11_Units ~ log_WD17_Units + log_SP13_Units, data = train)
+summary(d1mod3)
+residualPlot(d1mod3)
+```
+
+```{r}
+#Predict Model3 and evalaute the metrics
+predict3 <- predict(d1mod3, test)
+vif(d1mod3)
+RMSE(predict3, test$SP11_Units)
+MAE(predict3, test$SP11_Units)
+R2(predict3, test$SP11_Units)
+```
+
+
+
+```{r}
+#Estimating price elasticity for SPC11
+e3 <- NA
+#Change in price of SPC11 has not affected its change in quantity sold. Hence the elasticity cannot be determined.
+```
+
+
+```{r}
+e_Cust1 <- data.frame(e1,e2,e3)
+
+setnames(e_Cust1, old = c("e1","e2","e3"), new = c("WD009", "WD017", "SPC11"))
+rownames(e_Cust1) <- c("WD009", "WD017", "SPC11")
+e_Cust1
+
+#The diagonals in the matrix represent the price elasticity. The elements in the off-diagonal represent the cross-price elasticity
+
+#WD009 is the most sensitive(elastic) product to its own price.
+#WD017 and SPC11 have inelastic demand as their absolute value lies between 0 and 1
+```
+
+
+```{r}
+#change in price elasticity of WD009 over time?
+d1w1_b <- d1w1
+
+d1w1_b$log_WD9_Price <- log(d1w1_b$WD9_Price)
+
+d1w1_b$Elasticity = 0
+for (i in seq(1:61)){
+  d1w1_b$Elasticity[i] <- abs(-9333.522 * d1w1_b$log_WD9_Price[i]/d1w1$WD9_Units[i])
+}
+d1w1_b$EndDate <- d1w1_a$EndDate
+```
+
+
+```{r}
+ggplot(d1w1_b, aes(x= EndDate, y = Elasticity))+
+  geom_point(color = "blue")+
+  geom_line()+
+  theme_bw()+
+  labs(x="Time Period", title = "WD009 - Change in Elasticity over time")
+#The elasticity of WD009 was quite sturdy till May 2016 moving anywhere between 1 and 3 but has increased to 5 by July 2016
+```
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(d1w1_b, aes(x = EndDate))+
+  geom_line(aes(y = WD9_Price), color = "red", size = 1)+
+  geom_point(aes(y = WD9_Units/1000), color = "blue", size = 1)+
+  geom_line(aes(y = WD9_Units/1000), color = "steelblue")+
+  scale_y_continuous(sec.axis = sec_axis(~.*1000, name = "Units Sold"))+
+  theme_bw()+
+  labs(x="Time Period", y = "Unit Price", title = "WD009 - Change in price and quantity sold over Time")
+```
+
+```{r}
+#change in price elasticity of WD017 over time?
+d1w2_b <- d1w2
+
+d1w2_b$log_WD17_Price <- log(d1w2_b$WD17_Price)
+
+d1w2_b$Elasticity = 0
+for (i in seq(1:61)){
+  d1w2_b$Elasticity[i] <- abs(-7629.5 * d1w2_b$log_WD17_Price[i]/d1w2$WD17_Units[i])
+}
+d1w2_b$EndDate <- d1w2_a$EndDate
+```
+
+```{r}
+ggplot(d1w2_b, aes(x= EndDate, y = Elasticity))+
+  geom_point(color = "blue")+
+  geom_line()+
+  theme_bw()+
+  labs(x="Time Period", title = "WD017 - Change in Elasticity over time")
+#The elasticity of WD017 has moved up and down over the years but remained in the range of 1 to 3
+```
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(d1w2_b, aes(x = EndDate))+
+  geom_line(aes(y = WD17_Price), color = "red", size = 1)+
+  geom_point(aes(y = WD17_Units/1000), color = "blue", size = 1)+
+  geom_line(aes(y = WD17_Units/1000), color = "steelblue")+
+  scale_y_continuous(sec.axis = sec_axis(~.*1000, name = "Units Sold"))+
+  theme_bw()+
+  labs(x="Time Period", y = "Unit Price", title = "WD017 - Change in price and quantity sold over Time")
+```
+
+
+
+
+
+```{r}
+#Channel/Store Elasticity
+
+#Aggregate the sales of target product WD009 based on StoreNumber
+clusterdata1 <- data1
+
+cdata1 <- clusterdata1 %>%  filter(EndDate > "2015-04-24" & EndDate < "2016-04-01")
+
+cdata1 <- clusterdata1 %>% filter(PRODSTYLE == "WD009") %>% group_by(StoreNumber) %>% summarise(Tot_UnitsSold = sum(UnitsSold), Avg_UnitPrice = round(mean(UnitPrice),2)) %>% arrange(StoreNumber)
+summary(cdata1)
+```
+
+```{r}
+#Relationship between Avg Unit Price and Total Units Sold
+ggplot(cdata1, aes(x = Avg_UnitPrice, y = Tot_UnitsSold))+
+  geom_point(col ="red")
+```
+
+```{r}
+#Visualize Unit Price based on Store Level
+ggplot(cdata1, aes(x = Avg_UnitPrice))+
+  geom_histogram(binwidth = 0.1, fill = "red")+
+  theme_bw()+
+  labs(x = "Unit Price", y = "Count", title = "Unit Price - Store Level")
+```
+
+```{r}
+#Visualize quantity Sold based on Store Level
+ggplot(cdata1, aes(x = Tot_UnitsSold))+
+  geom_histogram(binwidth = 10, fill = "red")+
+  theme_bw()+
+  labs(x = "Quantity sold", y = "Count", title = "Quantity Sold - Store Level")
+```
+
+```{r}
+cdata1$store_loc1 <- ifelse(cdata1$Avg_UnitPrice < 4.91, 1, 0)
+cdata1$store_loc2 <- ifelse(cdata1$Avg_UnitPrice > 4.91 & cdata1$Avg_UnitPrice < 5.03, 1, 0)
+cdata1$store_loc3 <- ifelse(cdata1$Avg_UnitPrice > 5.03, 1, 0)
+```
+
+```{r}
+#Segmenting Stored based on K-Means clustering
+
+#Standardise the data
+z1 <- cdata1[,-1]
+cm1 <- apply(z1,2,mean)
+sd1 <- apply(z1,2,sd)
+z1 <- scale(z1,cm1,sd1)
+
+#Build K-Means with 5 clusters
+set.seed(200)
+kc1 <- kmeans(z1, 5)
+kc1
+
+#Print Scree plot and use elbow method to determine the optimal no of clusters
+wss <- 1:15
+for (i in 1:15)
+{
+  wss[i] <- kmeans(z1,i)$tot.withinss
+  print(wss[i])
+}
+
+number <- 1:15
+cdwss1 <- data.frame(wss, number)
+ggplot(cdwss1, aes(x = number, y = wss))+
+  geom_point(color= "red")+
+  geom_line(linetype = 3)+
+  theme_bw()+
+  scale_x_continuous(breaks = seq(1,15,1))+
+  geom_segment(aes(x = 3, y = 2500, xend = 3, yend = 10000))+
+  geom_text(x = 3.2, y = 10000, label = "Optimal no of clusters = 3")
+
+#Optimal no of cluster is 3. 
+#Update the model with new cluster number
+kc1 <- kmeans(z1, 3)
+kc1
+cdata1$Cluster <- kc1$cluster
+cdata1$Cluster <- as.factor(cdata1$Cluster)
+
+ggplot(cdata1, aes(x = Avg_UnitPrice, y = Tot_UnitsSold))+
+  geom_point(aes(color = Cluster))+
+  scale_color_brewer(palette = "Set1")+
+  theme_bw()
+```
+
+
+```{r}
+dummy <- cdata1[,c(1,7)]
+clusterdata1 <- left_join(clusterdata1,dummy, by = "StoreNumber") 
+
+#Cluster 1 Analysis
+#Aggregate data basedon Cluster 1
+cluster1 <- clusterdata1 %>% filter(Cluster == 1) %>% group_by(EndDate, PRODSTYLE) %>% summarize(UnitsSold = sum(UnitsSold), UnitPrice = round(mean(UnitPrice),2))
+
+cluster1$Week <- lubridate::week(ymd(cluster1$EndDate))
+summary(cluster1)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting Cluster1 based on the type of products
+c1d1w1 <- cluster1 %>% filter(PRODSTYLE == "WD009") %>% select(Week, WD9_Units = UnitsSold, WD9_Price = UnitPrice)
+c1d1w1 <- c1d1w1[-1]
+c1d1w1$ModWeek <- seq(1:61)
+
+c1d1w2 <- cluster1 %>% filter(PRODSTYLE == "WD017") %>% select(Week, WD17_Units = UnitsSold, WD17_Price = UnitPrice)
+c1d1w2 <- c1d1w2[-1]
+c1d1w2$ModWeek <- seq(1:61)
+
+c1d1s1 <- cluster1 %>% filter(PRODSTYLE == "SPC11") %>% select(Week, SP11_Units = UnitsSold, SP11_Price = UnitPrice)
+c1d1s1 <- c1d1s1[-1]
+c1d1s1$ModWeek <- seq(1:61)
+
+c1d1s2 <- cluster1 %>% filter(PRODSTYLE == "SPC13") %>% select(Week, SP13_Units = UnitsSold, SP13_Price = UnitPrice)
+c1d1s2 <- c1d1s2[-1]
+
+rdummy1 <- data.frame(Week = 21, SP13_Units = 6, SP13_Price = 0.11)
+c1d1s2 <- rbind(c1d1s2[1:56,], rdummy1,c1d1s2[57:59,])
+rdummy2 <- data.frame(Week = 24, SP13_Units = 4, SP13_Price = 0.42)
+c1d1s2 <- rbind(c1d1s2[1:59,], rdummy2,c1d1s2[60,])
+c1d1s2$ModWeek <- seq(1:61)
+```
+
+```{r}
+#Merge the product pice and quantity sold based on Weeks
+cluster1 <- full_join(c1d1w1,c1d1w2, by = "ModWeek") %>% full_join(.,c1d1s1, by = "ModWeek") %>% full_join(.,c1d1s2, by = "ModWeek")
+
+cluster1 <- cluster1[-c(4,5,8,11)]
+setnames(cluster1, old = "Week.x", new = "Week")
+cluster1
+
+M <- cor(cluster1)
+corrplot(M, method = "number")
+cluster1 <- cluster1[-c(6,9)]
+```
+
+```{r}
+#Creating log transformation
+cluster1$log_WD9_Units <- log(cluster1$WD9_Units)
+cluster1$log_WD9_Price <- log(cluster1$WD9_Price)
+cluster1$log_WD17_Units <- log(cluster1$WD17_Units)
+cluster1$log_WD17_Price <- log(cluster1$WD17_Price)
+cluster1$log_SP11_Price <- log(cluster1$SP11_Price)
+cluster1$log_SP13_Units <- log(cluster1$SP13_Units)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting the dataset into train and test
+set.seed(101)
+split <- sample.split(cluster1, SplitRatio = 0.85)
+train <- subset(cluster1, split == T)
+test <- subset(cluster1, split == F)
+```
+
+```{r}
+d1mod4 <- lm(WD9_Units ~ log_WD9_Price + Week, data = train)
+summary(d1mod4)
+residualPlot(d1mod4)
+```
+
+```{r}
+#Predict Model4 and evalaute the metrics
+predict4 <- predict(d1mod4, test)
+vif(d1mod4)
+RMSE(predict4, test$WD9_Units)
+MAE(predict4, test$WD9_Units)
+R2(predict4, test$WD9_Units)
+```
+
+
+```{r}
+#Estimating price elasticity for WD009 in Cluster 1
+ec1 <- round((-580.389 * (mean(cluster1$log_WD9_Price) / mean(cluster1$WD9_Units))),2)
+ec1
+print("A 10% increase in price for WD009 in Cluster 1 will result in 9.3% decrease in their demand")
+```
+
+
+```{r}
+#Cluster 2 Analysis
+cluster2 <- clusterdata1 %>% filter(Cluster == 2) %>% group_by(EndDate, PRODSTYLE) %>% summarize(UnitsSold = sum(UnitsSold), UnitPrice = round(mean(UnitPrice),2))
+
+cluster2$Week <- lubridate::week(ymd(cluster2$EndDate))
+summary(cluster2)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting Cluster1 based on the type of products
+c2d1w1 <- cluster2 %>% filter(PRODSTYLE == "WD009") %>% select(Week, WD9_Units = UnitsSold, WD9_Price = UnitPrice)
+c2d1w1 <- c2d1w1[-1]
+c2d1w1$ModWeek <- seq(1:61)
+
+c2d1w2 <- cluster2 %>% filter(PRODSTYLE == "WD017") %>% select(Week, WD17_Units = UnitsSold, WD17_Price = UnitPrice)
+c2d1w2 <- c2d1w2[-1]
+c2d1w2$ModWeek <- seq(1:61)
+
+c2d1s1 <- cluster2 %>% filter(PRODSTYLE == "SPC11") %>% select(Week, SP11_Units = UnitsSold, SP11_Price = UnitPrice)
+c2d1s1 <- c2d1s1[-1]
+c2d1s1$ModWeek <- seq(1:61)
+
+c2d1s2 <- cluster2 %>% filter(PRODSTYLE == "SPC13") %>% select(Week, SP13_Units = UnitsSold, SP13_Price = UnitPrice)
+c2d1s2 <- c2d1s2[-1]
+c2d1s2$ModWeek <- seq(1:61)
+```
+
+```{r}
+#Merge the product pice and quantity sold based on Weeks
+cluster2 <- full_join(c2d1w1,c2d1w2, by = "ModWeek") %>% full_join(.,c2d1s1, by = "ModWeek") %>% full_join(.,c2d1s2, by = "ModWeek")
+
+cluster2 <- cluster2[-c(4,5,8,11)]
+setnames(cluster2, old = "Week.x", new = "Week")
+cluster2
+
+M <- cor(cluster2)
+corrplot(M, method = "number")
+cluster2 <- cluster2[,-9]
+```
+
+```{r}
+#Creating log transformation
+cluster2$log_WD9_Units <- log(cluster2$WD9_Units)
+cluster2$log_WD9_Price <- log(cluster2$WD9_Price)
+cluster2$log_WD17_Units <- log(cluster2$WD17_Units)
+cluster2$log_WD17_Price <- log(cluster2$WD17_Price)
+cluster2$log_SP11_Units <- log(cluster2$SP11_Units)
+cluster2$log_SP11_Price <- log(cluster2$SP11_Price)
+cluster2$log_SP13_Units <- log(cluster2$SP13_Units)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting the dataset into train and test
+set.seed(101)
+split <- sample.split(cluster2, SplitRatio = 0.85)
+train <- subset(cluster2, split == T)
+test <- subset(cluster2, split == F)
+```
+
+```{r}
+d1mod5 <- lm(WD9_Units ~ log_WD9_Price + Week, data = train)
+summary(d1mod5)
+residualPlot(d1mod5)
+```
+
+```{r}
+#Predict Model5 and evalaute the metrics
+predict5 <- predict(d1mod5, test)
+vif(d1mod5)
+RMSE(predict5, test$WD9_Units)
+MAE(predict5, test$WD9_Units)
+R2(predict5, test$WD9_Units)
+```
+
+```{r}
+#Estimating price elasticity for WD009 in Cluster 2
+ec2 <- round((-5623.049 * (mean(cluster2$log_WD9_Price) / mean(cluster2$WD9_Units))),2)
+ec2
+print("A 10% increase in price for WD009 in Cluster 2 will result in 31.9% decrease in their demand")
+```
+
+
+```{r}
+#Cluster 3 Analysis
+cluster3 <- clusterdata1 %>% filter(Cluster == 3) %>% group_by(EndDate, PRODSTYLE) %>% summarize(UnitsSold = sum(UnitsSold), UnitPrice = round(mean(UnitPrice),2))
+
+cluster3$Week <- lubridate::week(ymd(cluster3$EndDate))
+summary(cluster3)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting Cluster1 based on the type of products
+c3d1w1 <- cluster3 %>% filter(PRODSTYLE == "WD009") %>% select(Week, WD9_Units = UnitsSold, WD9_Price = UnitPrice)
+c3d1w1 <- c3d1w1[-1]
+c3d1w1$ModWeek <- seq(1:61)
+
+c3d1w2 <- cluster3 %>% filter(PRODSTYLE == "WD017") %>% select(Week, WD17_Units = UnitsSold, WD17_Price = UnitPrice)
+c3d1w2 <- c3d1w2[-1]
+c3d1w2$ModWeek <- seq(1:61)
+
+c3d1s1 <- cluster3 %>% filter(PRODSTYLE == "SPC11") %>% select(Week, SP11_Units = UnitsSold, SP11_Price = UnitPrice)
+c3d1s1 <- c3d1s1[-1]
+rdummy2 <- data.frame(Week = 24, SP11_Units = 5, SP11_Price = 0.11)
+c3d1s1 <- rbind(c3d1s1[1:59,], rdummy2,c3d1s1[60,])
+c3d1s1$ModWeek <- seq(1:61)
+
+c3d1s2 <- cluster3 %>% filter(PRODSTYLE == "SPC13") %>% select(Week, SP13_Units = UnitsSold, SP13_Price = UnitPrice)
+c3d1s2 <- c3d1s2[-1]
+c3d1s2$ModWeek <- seq(1:61)
+```
+
+```{r}
+#Merge the product pice and quantity sold based on Weeks
+cluster3 <- full_join(c3d1w1,c3d1w2, by = "ModWeek") %>% full_join(.,c3d1s1, by = "ModWeek") %>% full_join(.,c3d1s2, by = "ModWeek")
+
+cluster3 <- cluster3[-c(4,5,8,11)]
+setnames(cluster3, old = "Week.x", new = "Week")
+cluster3
+
+M <- cor(cluster3)
+corrplot(M, method = "number")
+cluster3 <- cluster3[,-9]
+```
+
+
+```{r}
+#Creating log transformation
+cluster3$log_WD9_Units <- log(cluster3$WD9_Units)
+cluster3$log_WD9_Price <- log(cluster3$WD9_Price)
+cluster3$log_WD17_Units <- log(cluster3$WD17_Units)
+cluster3$log_WD17_Price <- log(cluster3$WD17_Price)
+cluster3$log_SP11_Units <- log(cluster3$SP11_Units)
+cluster3$log_SP11_Price <- log(cluster3$SP11_Price)
+cluster3$log_SP13_Units <- log(cluster3$SP13_Units)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Splitting the dataset into train and test
+set.seed(101)
+split <- sample.split(cluster3, SplitRatio = 0.85)
+train <- subset(cluster3, split == T)
+test <- subset(cluster3, split == F)
+```
+
+```{r}
+d1mod6 <- lm(WD9_Units ~ log_WD9_Price + Week, data = train)
+summary(d1mod6)
+residualPlot(d1mod6)
+```
+
+```{r}
+#Predict Model6 and evalaute the metrics
+predict6 <- predict(d1mod6, test)
+vif(d1mod6)
+RMSE(predict6, test$WD9_Units)
+MAE(predict6, test$WD9_Units)
+R2(predict6, test$WD9_Units)
+```
+
+```{r}
+#Estimating price elasticity for WD009 in Cluster 3
+ec3 <- round((-3237.408 * (mean(cluster3$log_WD9_Price) / mean(cluster3$WD9_Units))),2)
+ec3
+print("A 10% increase in price for WD009 in Cluster 3 will result in 50.6% decrease in their demand")
+```
+
+```{r}
+e_Channel1 <- data.frame(ec1,ec2,ec3)
+
+setnames(e_Channel1, old = c("ec1","ec2","ec3"), new = c("Cluster1", "Cluster2", "Cluster3"))
+rownames(e_Channel1) <- "WD009"
+e_Channel1
+
+#Cluster 3 stores are the most sensitive(elastic) among all the other segments. 
+#Cluster 1 stores are not elastic. 
+```
+
+
+
