@@ -20,8 +20,8 @@ To clear the doubts and to find a way to solve this challenge,
 
 <b>(b)	Feature Engineering:</b> To build the model, I understood I need to engineer few variables like price of one product, week number and log transformations of few more variables to make them normally distributed. Well-engineered variables will always yield a better and accurate model!
 
-<img src = "Images/1d.JPG">
-<img src = "Images/1e.JPG">
+<img src = "Images/1d.JPG" width = "650" height = "450">
+<img src = "Images/1e.JPG" width = "650" height = "450">
 
 <h3>4.	Modelling:</h3> The fancy stage in the entire Data Science process – building models. I was not fortunate enough to build advanced model as a statistical algorithm like linear regression only will help to solve the problem of determining elasticity of a product. Nevertheless, I was lucky to apply linear regression in-depth, avoiding over-fitting issues and learning more about the assumptions and interpretations of linear regression results (I believe this would be a strong foundation for building advanced models in future. The key thing to note is to solve a business problem with a more sophisticated and scalable algorithm than building advanced models that may not fit the business requirement). I estimated both price elasticity and cross-price elasticity of the target brand based on customer segments and time period to present a comparative picture.
 
@@ -41,6 +41,7 @@ Q - Tot. Quantity sold of the target product
 
                        Price elasticity of Demand = Change in quantity (ΔQ) / Change in Price (ΔPX1)
 
+<img src = "Images/1h.JPG" width = "650" height = "450">
 
 <h3>5.	Evaluation:</h3> The key evaluation metric was RMSE or Root Mean Square Error value which needs to be as low as possible to determine the efficiency of the linear regression model. Also, I have considered MAE and predicted R2 scores as other key evaluation parameters.
 Finally, what can be inferred from this exercise?  
